@@ -33,14 +33,14 @@
 int16_t kc = 0;   // Parameter value for Kc value in %/°C
 int16_t ti = 0;   // Parameter value for I action in seconds
 int16_t td = 0;   // Parameter value for D action in seconds
-int32_t kpi;      // Internal P-action result for debugging
-int32_t kii;      // Internal I-action result for debugging
-int32_t kdi;      // Internal D-action result for debugging
+float kpi;        // Internal P-action result for debugging
+float kii;        // Internal I-action result for debugging
+float kdi;        // Internal D-action result for debugging
 
 // Init ts to 0 to disable pid-control and enable thermostat control
 uint8_t  ts = 0;   // Parameter value for sample time [sec.]
-int32_t  ki;       // Internal value for I action
-int32_t  kd;       // Internal value for D action
+float    ki;       // Internal value for I action
+float    kd;       // Internal value for D action
 int32_t  pp;       // debug
 int16_t  yk_1;     // y[k-1]
 int16_t  yk_2;     // y[k-2]
@@ -71,19 +71,19 @@ void init_pid(uint16_t kc, uint16_t ti, uint16_t td, uint8_t ts, uint16_t yk)
 {
    if (ti == 0) 
    {
-       ki  = 0;
+       ki  = 0.0;
    } // if
    else 
    {
-       ki = (int32_t)(((float)kc * ts / ti) + 0.5);
+       ki = (float)kc * ts / ti;
    } // else
    if (ts == 0) 
    {
-       kd  = 0;
+       kd  = 0.0;
    } // if
    else
    {
-       kd = (int32_t)(((float)kc * td / ts) + 0.5);
+       kd = (float)kc * td / ts;
    } // else
    yk_2 = yk_1 = yk; // init. previous samples to current temperature
 } // init_pid()
@@ -113,9 +113,9 @@ void pid_ctrl(int16_t yk, int16_t *uk, int16_t tset, int16_t lim, bool ena)
     //-----------------------------------------------------------------------------
     if (ena)
     {
-        kpi  = (int32_t)kc * (yk_1 - yk);               // Kc.(y[k-1]-y[k])
-        kii  = (int32_t)ki * (tset - yk);               // (Kc.Ts/Ti).e[k]
-        kdi  = (int32_t)kd * ((yk_1 << 1) - yk - yk_2); // (Kc.Td/Ts).(2.y[k-1]-y[k]-y[k-2])
+        kpi  = (float)kc * (yk_1 - yk);        // Kc.(y[k-1]-y[k])
+        kii  = ki * (tset - yk);               // (Kc.Ts/Ti).e[k]
+        kdi  = kd * ((yk_1 << 1) - yk - yk_2); // (Kc.Td/Ts).(2.y[k-1]-y[k]-y[k-2])
         *uk += (int16_t)(kpi + kii + kdi);
         // limit u[k] to lim and 0
         if (*uk > lim)    *uk = lim;

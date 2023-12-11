@@ -142,6 +142,7 @@
 #define BUZZER   (0x10) /* PA4: Buzzer */
 #define SSR      (0x08) /* PA3: SSR output */
 
+#define ISR_OUTb (PA_ODR_ODR6)
 #define BUZZERb  (PA_ODR_ODR4)
 #define SSRb     (PA_ODR_ODR3)
 
@@ -210,11 +211,24 @@
 #define STD_CC4	(5)  /* Display 4 CC */
 #define STD_CC6	(6)  /* Display 6 CC */ 
 #define STD_CCX	(7)  /* Display with remaining leds, CC */
-                     
+
+//-----------------------------
+// Buzer STD modes
+//-----------------------------
+enum buzzer_states
+{
+  BZ_OFF = 0,
+  BZ_ON,
+  BZ_ON2,
+  BZ_BURST,
+  BZ_SHORT
+}; // buzzer_states
+    
 // Function prototypes
 void setAsInputs(void);
 void setAsOutputs(uint8_t maskC, uint8_t maskD);
 void multiplexer(void);
+void buzzer(void);
 void initialise_system_clock(void);
 void setup_timer2(void);
 void setup_gpio_ports(void);

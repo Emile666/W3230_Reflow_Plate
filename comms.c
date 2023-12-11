@@ -33,7 +33,8 @@ extern int16_t pid_out;        // Output from PID controller in E-1 %
 extern bool    pid_sw;         // Switch for pid_out
 extern int16_t pid_fx;         // Fix-value for pid_out
 char rs232_inbuf[UART_BUFLEN]; // buffer for RS232 commands
-uint8_t rs232_ptr = 0;         // index in RS232 buffer
+uint8_t        rs232_ptr = 0;  // index in RS232 buffer
+bool           uart_logging = false; // true = log PID values to UART
 
 extern char version[];
 
@@ -242,10 +243,15 @@ uint8_t execute_single_command(char *s)
    {  // single letter command
       switch (s[0])
       {
+       case 'l': // Enable logging to UART
+               if (!num)          uart_logging = false;
+               else if (num == 1) uart_logging = true;
+               else rval = ERR_NUM;
+               break;
        case 'p': // Request to send parameters or one of the profiles
                if (num <= NO_OF_PROFILES)
                {  // send Profile or parameters to the ESP8266 web-server
-                      send_eep_block(num);  
+                  send_eep_block(num);  
                } // if
                break;
        case 's': // System commands

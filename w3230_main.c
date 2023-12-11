@@ -18,8 +18,7 @@
  
   You should have received a copy of the GNU General Public License
   along with this file.  If not, see <http://www.gnu.org/licenses/>.
-  ==================================================================
-*/ 
+  ==================================================================*/ 
 #include <intrinsics.h> 
 #include <stdio.h>
 #include "w3230_main.h"
@@ -35,7 +34,7 @@
 #include "misc.h"
 
 // Version number for W3230 firmware
-char version[] = "W3230-Reflow V0.10\n";
+char version[] = "W3230-Reflow V0.11\n";
 
 // Global variables
 int16_t   temp_tc;           // The temperature in °C from the thermocouple
@@ -45,6 +44,17 @@ int16_t   pwr_on_tmr = 1000; // Needed for 7-segment display test
 bool      pid_sw = false;    // Switch for pid_out
 int16_t   pid_fx = 0;        // Fix-value for pid_out
 ma        tc_ma;             // struct for thermocouple MA filter temperature
+
+//------------------------------------------------
+// Buzzer variables
+//------------------------------------------------
+bool     bz_on = false;    // true = buzzer is enabled
+bool     bz_dbl;           // true = generate 2nd beep
+uint8_t  bz_std = BZ_OFF;  // std number
+uint8_t  bz_rpt;           // buzzer repeat counter
+uint8_t  bz_rpt_max;       // number of beeps to make
+uint16_t bz_tmr;           // buzzer msec counter
+uint16_t bz_dur = 50;      // buzzer duration, 50 = 100 msec.
 
 // External variables, defined in other files
 extern bool     no_tc;            // 1 = no thermocouple present
@@ -61,6 +71,10 @@ extern int16_t  pid_out;          // Output from PID controller in E-1 %
 extern uint32_t t2_millis;        // needed for delay_msec()
 extern uint8_t  rs232_inbuf[];
 extern uint8_t  std_tc;           // State for Temperature Control
+extern float    kpi;              // Internal P-action result for debugging
+extern float    kii;              // Internal I-action result for debugging
+extern float    kdi;              // Internal D-action result for debugging
+extern bool     uart_logging;     // true = log PID values to UART
 
 /*-----------------------------------------------------------------------------
   Purpose  : This routine sets all port C and D pins connected to the 7-segment
@@ -280,6 +294,67 @@ void multiplexer(void)
     setAsOutputs(pc_msk,pd_msk); // Enable only outputs that are active in a state
 } // multiplexer()
 
+/*------------------------------------------------------------------
+  Purpose  : This is the buzzer routine which runs every msec. 
+             (f=1 kHz). It is used by 1 kHz interrupt routine.
+  Variables: -
+  Returns  : -
+  ------------------------------------------------------------------*/
+void buzzer(void)
+{
+    switch (bz_std)
+    {
+        case BZ_OFF:   
+           BUZZERb = 0;
+           if (bz_on) 
+           {
+               bz_tmr = 0;
+               bz_rpt = 0;
+               bz_dbl = false;
+               bz_std = BZ_ON;
+           } // if
+           break;
+        case BZ_ON:    
+           BUZZERb = 1;
+           if (++bz_tmr > bz_dur) 
+           {
+               bz_tmr = 0;
+               if (!bz_dbl)
+                    bz_std = BZ_SHORT;
+               else bz_std = BZ_BURST;
+           } // if
+           else bz_std = BZ_ON2;					 
+           break;
+        case BZ_ON2:   
+           BUZZERb = 0;
+           bz_std = BZ_ON;
+           break;
+        case BZ_SHORT: 
+           BUZZERb = 0;
+           bz_dbl = true;
+           if (++bz_tmr >= bz_dur)
+           {
+               bz_tmr = 0;
+               bz_std = BZ_ON;
+           } // if
+           break;		
+        case BZ_BURST: 
+           BUZZERb = 0;
+           if (++bz_tmr > 500)
+           {
+               bz_tmr = 0;  
+               bz_dbl = false;
+               if (++bz_rpt >= bz_rpt_max) 
+               {
+                  bz_on  = false;
+                  bz_std = BZ_OFF;
+               } // if
+               else bz_std = BZ_ON;
+           } // if
+           break;
+    } // switch
+} // buzzer()
+
 /*-----------------------------------------------------------------------------
   Purpose  : This is the interrupt routine for the Timer 2 Overflow handler.
              It runs at 1 kHz and drives the scheduler and the multiplexer.
@@ -290,9 +365,10 @@ void multiplexer(void)
 #pragma vector=TIM2_OVR_UIF_vector
 __interrupt void TIM2_UPD_OVF_IRQHandler(void)
 {
-    PA_ODR |= ISR_OUT; // Time-measurement interrupt routine
-    t2_millis++;       // update millisecond counter
-    scheduler_isr();   // Run scheduler interrupt function
+    ISR_OUTb = 1;    // Time-measurement interrupt routine
+    t2_millis++;     // update millisecond counter
+    scheduler_isr(); // Run scheduler interrupt function
+    buzzer();        // Run buzzer routine
     
     if (pwr_on_tmr > 0)
     {	// 7-segment display test for 1 second
@@ -300,9 +376,9 @@ __interrupt void TIM2_UPD_OVF_IRQHandler(void)
         top_10 = top_1 = top_01 = LED_ON;
         bot_10 = bot_1 = bot_01 = LED_ON;
     } // else if
-    multiplexer();        // Run multiplexer for Display
-    PA_ODR   &= ~ISR_OUT; // Time-measurement interrupt routine
-    TIM2_SR1_UIF = 0;     // Reset interrupt (UIF bit) so it will not fire again straight away.
+    multiplexer();    // Run multiplexer for Display
+    ISR_OUTb = 0;     // Time-measurement interrupt routine
+    TIM2_SR1_UIF = 0; // Reset interrupt (UIF bit) so it will not fire again straight away.
 } // TIM2_UPD_OVF_IRQHandler()
 
 /*-----------------------------------------------------------------------------
@@ -378,7 +454,7 @@ void setup_gpio_ports(void)
 } // setup_output_ports()
 
 /*-----------------------------------------------------------------------------
-  Purpose  : This task is called every 500 msec. and processes the temperature
+  Purpose  : This task is called every second and processes the temperature
              from the thermocouple, connected to the MAX6675
   Variables: -
   Returns  : -
@@ -386,12 +462,19 @@ void setup_gpio_ports(void)
 void adc_task(void)
 {
   int16_t temp;
+  uint8_t N = eeprom_read_config(EEADR_MENU_ITEM(LPF));
   
   temp   = max6675_read(); // read thermocouple temperature (Q10.2 format)
   temp  += 2;              // round up
   temp >>= 2;              // temp_tc is now in °C
   
-  temp_tc = (int16_t)(moving_average(&tc_ma,(float)temp) + 0.5);  
+  if (tc_ma.N != N)
+  { // LPF parameter has changed
+    init_moving_average(&tc_ma,N,(float)temp);
+  } // if  
+  if (N > 1) // only run filter when N > 1
+       temp_tc = (int16_t)(moving_average(&tc_ma,(float)temp) + 0.5);  
+  else temp_tc = temp;
   conv_fahrenheit();       // convert temp_tc °C to temp_tf °F
 } // adc_task()
 
@@ -489,21 +572,22 @@ void ctrl_task(void)
 
    if (no_tc || err_id)
    {
-       //ALARM_ON;   // enable the piezo buzzer
+       bz_rpt_max = 1; // Sound buzzer to indicate thermocouple is not connected
+       bz_on      = true;
        if (menu_is_idle)
        {  // Make it less anoying to nagivate menu during alarm
           top_10 = LED_A;
 	  top_1  = LED_L;
 	  top_01 = LED_A;
-          bot_10 = LED_S;
-          if (no_tc) { bot_1 = LED_n; bot_01 = LED_o; }
-          else       { bot_1 = LED_I; bot_01 = LED_d; }
+          bot_01 = LED_S;
+          if (no_tc) { bot_10 = LED_n; bot_1 = LED_o; }
+          else       { bot_10 = LED_I; bot_1 = LED_d; }
        } // if
+       pid_out = 0; // disable PID-output / SSR
    } else {
-       //ALARM_OFF;   // reset the piezo buzzer
-       ts        = eeprom_read_config(EEADR_MENU_ITEM(Ts));  // Read Ts [seconds]
+       ts = eeprom_read_config(EEADR_MENU_ITEM(Ts));  // Read Ts [seconds]
        if (ts == 0) // PID Ts parameter is 0?
-            pid_out = 0;          // Disable PID-output
+            pid_out = 0;          // Disable PID-output / SSR
        else pid_control(temp);    // Run PID controller
        LD_BLUEb = (run_profile == true); // Blue LED = run_profile is active
        // --------- Manual switch/fix for pid-output --------------------
@@ -511,19 +595,17 @@ void ctrl_task(void)
 
        if (menu_is_idle)          // show temperature if menu is idle
        {
+           switch (sensor2_selected)
            {
-               switch (sensor2_selected)
-               {
-                case 0:
-                     value_to_led(temp    ,DECIMAL0,ROW_TOP); // display temperature on top row
-                     value_to_led(setpoint,DECIMAL0,ROW_BOT); // display setpoint on bottom row
-                     break;
-                case 1:
-                     value_to_led(pid_out,DECIMAL0,ROW_TOP); // display pid-output on top row
-                     bot_10 = LED_P; bot_1 = LED_I; bot_01 = LED_d;
-                     break;
-               } // switch
-           } // else
+            case 0:
+                 value_to_led(temp    ,DECIMAL0,ROW_TOP); // display temperature on top row
+                 value_to_led(setpoint,DECIMAL0,ROW_BOT); // display setpoint on bottom row
+                 break;
+            case 1:
+                 value_to_led(pid_out,DECIMAL0,ROW_TOP); // display pid-output on top row
+                 bot_10 = LED_P; bot_1 = LED_I; bot_01 = LED_d;
+                 break;
+           } // switch
        } // if
    } // else
 } // ctrl_task()
@@ -537,14 +619,16 @@ void ctrl_task(void)
 void prfl_task(void)
 {
     static uint8_t sec = 0;
-    char  s2[25];
+    char  s2[30];
         
     update_profile(); 
-    // Logging to UART every 5 seconds
-    if (++sec >= 5)
-    {   // every 5 seconds
+    // Logging to UART
+    if ((++sec >= 4) && uart_logging)
+    {   // every 4 seconds
         sec = 0;
-        sprintf(s2,"l%d %d %d\n",std_tc,fahrenheit ? temp_tf : temp_tc,setpoint);
+        sprintf(s2,"SP:%d PV:%d PID:%d ",setpoint,fahrenheit ? temp_tf : temp_tc,pid_out);
+        xputs(s2);
+        sprintf(s2,"%d %d %d\n",(int16_t)kpi,(int16_t)kii,(int16_t)kdi);
         xputs(s2);
     } // if
 } // prfl_task();
@@ -565,7 +649,7 @@ int main(void)
     spi_init();                // Init. SPI bus
     uart_init();               // Init. serial communication
     
-    init_moving_average(&tc_ma,5,20.0);
+    tc_ma.N = 0; // make sure MA-filter struct gets initialized in adc_task()
     // Initialise all tasks for the scheduler
     scheduler_init();                    // clear task_list struct
     add_task(adc_task ,"ADC",  0, 1000); // every second

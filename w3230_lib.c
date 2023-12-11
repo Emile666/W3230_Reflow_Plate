@@ -77,6 +77,8 @@ extern int16_t  td;             // Parameter value for D action in seconds
 extern uint8_t  ts;             // Parameter value for sample time [sec.]
 extern char     version[];      // Version info string
 extern int32_t  kpi, kii, kdi;
+extern bool     bz_on;          // true = buzzer-on
+extern uint8_t  bz_rpt_max;     // number of buzzer repeats
 
 // This contains the definition of the menu-items for the parameters menu
 const struct s_menu menu[] = 
@@ -362,6 +364,12 @@ int16_t check_config_value(int16_t config_value, uint8_t eeadr)
         } else if (type == t_boolean)
         {   // the control variables
             t_max = 1;
+        } else if (type == t_filter)
+        {   // Order for MA-filter
+            t_max = 5;
+        } else if (type == t_percent)
+        {   // Percentage
+            t_max = 100;
         } else if (type == t_runmode)
         {
             t_max = NO_OF_PROFILES;
@@ -428,8 +436,14 @@ void menu_fsm(void)
        case MENU_REFLOW_WAIT:
             if (m_countdown == 0)
             {
-                run_profile  = true;
-                menustate    = MENU_IDLE;
+                run_profile  = !run_profile; // start/stop running a profile
+                if (run_profile)
+                { // Set Feed-Forward factor for PID-controller at start
+                  pid_out = eeprom_read_config(EEADR_MENU_ITEM(FFF));
+                } // if
+                menustate    = MENU_IDLE;    // return to IDLE state
+                bz_rpt_max   = 1;            // Sound buzzer once
+                bz_on        = true;         // Enable buzzer in ISR
             } else if(!BTN_HELD(BTN_PWR))
             {   // 0 = temp_tc, 1 = pid-output
                 if (++sensor2_selected > 1)  

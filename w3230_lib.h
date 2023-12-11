@@ -46,6 +46,7 @@
 // 1) proper #include in w3230_main.h: <iostm8s105c6.h>
 // 2) Project -> Options -> Target -> Device to STM8S105C6
 //---------------------------------------------------------------------------
+#define PROFILE0         (0)
 #define NO_OF_PROFILES	 (6)
 #define NO_OF_TT_PAIRS   (9)
 #define PROFILE_SIZE     (2*(NO_OF_TT_PAIRS)+1)
@@ -66,7 +67,9 @@ enum e_item_type
     t_tempdiff,
     t_runmode,
     t_duration,
+    t_filter,
     t_boolean,
+    t_percent,
     t_parameter
 }; // e_item_type
 
@@ -80,23 +83,26 @@ enum e_item_type
 // SP	Set setpoint	                              -40 to 140°C or -40 to 250°F
 // tc	Set temperature correction	              -5.0 to 5.0°C or -10.0 to 10.0°F
 // CF	Set Celsius of Fahrenheit temperature display 0 = Celsius, 1 = Fahrenheit
-// Hc   Kc parameter for PID controller in %/°C       0..9999 
-// ti   Ti parameter for PID controller in seconds    0..9999 
-// td   Td parameter for PID controller in seconds    0..9999 
-// ts   Ts parameter for PID controller in seconds    0..9999, 0 = disable PID controller = thermostat control
+// Hc   Kc parameter for PID controller in %/°C       0..999 
+// ti   Ti parameter for PID controller in seconds    0..999 
+// td   Td parameter for PID controller in seconds    0..999 
+// ts   Ts parameter for PID controller in seconds    0..999, 0 = disable PID controller = thermostat control
+// LPF  Order for Moving-Average filter for temp      0..5,   0 = no filtering
 // rn	Set run mode	                              Pr0 to Pr5 and th (6)
 //-----------------------------------------------------------------------------
 #define MENU_DATA(_) \
 	_(SP, 	LED_S, 	LED_P, 	LED_OFF, t_temperature,	20) \
 	_(tc, 	LED_t, 	LED_c, 	LED_OFF, t_tempdiff,	0)  \
 	_(CF, 	LED_C, 	LED_F, 	LED_OFF, t_boolean,	0)  \
-	_(Hc, 	LED_H, 	LED_c, 	LED_OFF, t_parameter,	2)  \
-	_(Ti, 	LED_t, 	LED_I, 	LED_OFF, t_parameter,  17)  \
+	_(Hc, 	LED_H, 	LED_c, 	LED_OFF, t_parameter,	3)  \
+	_(Ti, 	LED_t, 	LED_I, 	LED_OFF, t_parameter,  20)  \
 	_(Td, 	LED_t, 	LED_d, 	LED_OFF, t_parameter,   4)  \
-	_(Ts, 	LED_t, 	LED_S, 	LED_OFF, t_parameter,   5)  \
-	_(rn, 	LED_r, 	LED_u, 	LED_n,   t_runmode,     NO_OF_PROFILES)
+	_(Ts, 	LED_t, 	LED_S, 	LED_OFF, t_parameter,   4)  \
+	_(LPF, 	LED_L, 	LED_P, 	LED_F,   t_filter,      3)  \
+	_(FFF, 	LED_F, 	LED_F, 	LED_F,   t_percent,     0)  \
+	_(rn, 	LED_r, 	LED_u, 	LED_n,   t_runmode,     PROFILE0)
 
-#define MENU_SIZE (8) /* Number of parameters in MENU_DATA */
+#define MENU_SIZE (10) /* Number of parameters in MENU_DATA */
 
 #define ENUM_VALUES(name,led10ch,led1ch,led01ch,type,default_value) name,
 #define EEPROM_DEFAULTS(name,led10ch,led1ch,led01ch,type,default_value) default_value,
